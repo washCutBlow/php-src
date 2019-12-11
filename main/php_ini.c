@@ -771,6 +771,9 @@ int php_shutdown_config(void)
  */
 void php_ini_register_extensions(void)
 {
+
+	// extension_lists是一个链表，保存着根据php.ini中定义的extension=xxx.so取到的全部扩展名称
+	// 其中engine是zend的扩展，functions是php的扩展
 	zend_llist_apply(&extension_lists.engine, php_load_zend_extension_cb);
 	zend_llist_apply(&extension_lists.functions, php_load_php_extension_cb);
 

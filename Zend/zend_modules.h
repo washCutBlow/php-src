@@ -70,21 +70,23 @@ struct _zend_ini_entry;
 typedef struct _zend_module_entry zend_module_entry;
 typedef struct _zend_module_dep zend_module_dep;
 
+/*开发一个php扩展，需要创建一个该结构体，这个变量必须是全局变量， 且变量名
+必须是： 扩展名称_module_entry*/
 struct _zend_module_entry {
-	unsigned short size;
+	unsigned short size; // sizeof(zend_module_entry) 指针头长度
 	unsigned int zend_api;
-	unsigned char zend_debug;
-	unsigned char zts;
+	unsigned char zend_debug; //是否开启debug
+	unsigned char zts;// 是否开启线程安全
 	const struct _zend_ini_entry *ini_entry;
 	const struct _zend_module_dep *deps;
-	const char *name;
-	const struct _zend_function_entry *functions;
-	int (*module_startup_func)(INIT_FUNC_ARGS);
-	int (*module_shutdown_func)(SHUTDOWN_FUNC_ARGS);
-	int (*request_startup_func)(INIT_FUNC_ARGS);
-	int (*request_shutdown_func)(SHUTDOWN_FUNC_ARGS);
-	void (*info_func)(ZEND_MODULE_INFO_FUNC_ARGS);
-	const char *version;
+	const char *name; // 扩展名称不能重复
+	const struct _zend_function_entry *functions; // 扩展提供的内部函数列表
+	int (*module_startup_func)(INIT_FUNC_ARGS); //扩展初始化回调函数， PHP_MINIT_FUNCTION或ZEND_MINIT_FUNCTION定义的函数
+	int (*module_shutdown_func)(SHUTDOWN_FUNC_ARGS);//扩展关闭时回调函数
+	int (*request_startup_func)(INIT_FUNC_ARGS);//请求开始前回调函数
+	int (*request_shutdown_func)(SHUTDOWN_FUNC_ARGS);//请求结束时回调函数
+	void (*info_func)(ZEND_MODULE_INFO_FUNC_ARGS);//php_info展示的扩展信息	处理函数
+	const char *version;// 版本
 	size_t globals_size;
 #ifdef ZTS
 	ts_rsrc_id* globals_id_ptr;
@@ -97,7 +99,7 @@ struct _zend_module_entry {
 	int module_started;
 	unsigned char type;
 	void *handle;
-	int module_number;
+	int module_number;// 扩展的唯一编号
 	const char *build_id;
 };
 

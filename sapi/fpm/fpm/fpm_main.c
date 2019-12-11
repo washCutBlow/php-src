@@ -847,7 +847,8 @@ static int php_cgi_startup(sapi_module_struct *sapi_module) /* {{{ */
 static sapi_module_struct cgi_sapi_module = {
 	"fpm-fcgi",						/* name */
 	"FPM/FastCGI",					/* pretty name */
-
+	/*模块初始化，php.ini文件的解析，php动态扩展so、php扩展、zend扩展的启动都是在这里完成的
+	 * 具体可以参见实现*/
 	php_cgi_startup,				/* startup */
 	php_module_shutdown_wrapper,	/* shutdown */
 
@@ -1567,6 +1568,11 @@ static zend_module_entry cgi_module_entry = {
 
 /* {{{ main
  */
+
+/*php-fpm启动流程
+ *
+ *
+ * */
 int main(int argc, char *argv[])
 {
 	int exit_status = FPM_EXIT_OK;
@@ -1617,7 +1623,9 @@ int main(int argc, char *argv[])
 #endif
 
 	zend_signal_startup();
-
+	/* 1 在终端执行php-fpm start启动命令时，首先是进入一个已经启动的shell进程（该进程处理php-fpm相关shell终端输入的命令）
+	 * 以fpm的方式调用SAPI的接口启动
+	 * */
 	sapi_startup(&cgi_sapi_module);
 	cgi_sapi_module.php_ini_path_override = NULL;
 	cgi_sapi_module.php_ini_ignore_cwd = 1;
@@ -1763,6 +1771,8 @@ int main(int argc, char *argv[])
 #else
 				php_printf("PHP %s (%s) (built: %s %s)\nCopyright (c) 1997-2018 The PHP Group\n%s", PHP_VERSION, sapi_module.name, __DATE__, __TIME__,      get_zend_version());
 #endif
+				/*php_request_shutdown：请求关闭。调用注册的register_shutdown_function回调，调用__destruct析构函数，调用所有php扩展的RSHUTDOWN函数，flush输出内容，发送http响应header，清理全局变量，关闭编译器、执行器，关闭连接fd等。*/
+				/*当worker进程执行完php_request_shutdown后会再次调用fcgi_accept_request函数，准备监听新的请求。这里可以看到一个worker进程只能顺序的处理请求，在处理当前请求的过程中，该worker进程不会接受新的请求连接*/
 				php_request_shutdown((void *) 0);
 				fcgi_shutdown();
 				exit_status = FPM_EXIT_OK;
@@ -1866,7 +1876,8 @@ consult the installation file that came with this distribution, or visit \n\
 	old_rc_debug = zend_rc_debug;
 	zend_rc_debug = 0;
 #endif
-
+	/*fpm进程相关初始化。这个函数也比较重要。解析php-fpm.conf、fork master进程、安装信号处理器、打开监听socket（默认9000端口）都是在这里完成的
+	 * */
 	ret = fpm_init(argc, argv, fpm_config ? fpm_config : CGIG(fpm_config), fpm_prefix, fpm_pid, test_conf, php_allow_to_run_as_root, force_daemon, force_stderr);
 
 #if ZEND_RC_DEBUG
@@ -1891,7 +1902,11 @@ consult the installation file that came with this distribution, or visit \n\
 		close(fpm_globals.send_config_pipe[1]);
 	}
 	fpm_is_running = 1;
-
+/*根据php-fpm.conf的配置fork worker进程（一个监听端口对应一个worker pool即进程池，worker进程从属于worker pool，只处理该监听端口的请求）。
+ * 然后进入fpm_event_loop函数，无限等待事件的到来
+ * 事件循环。一直等待着信号事件或者定时器事件的发生
+ *
+ * */
 	fcgi_fd = fpm_run(&max_requests);
 	parent = 0;
 
@@ -1903,9 +1918,11 @@ consult the installation file that came with this distribution, or visit \n\
 	php_import_environment_variables = cgi_php_import_environment_variables;
 
 	/* library is already initialized, now init our request */
+	/*初始化request对象。设置request的listen_socket为从父进程复制过来的相应worker pool对应的监听socket*/
 	request = fpm_init_request(fcgi_fd);
 
 	zend_first_try {
+		/*fcgi_accept_request：监听请求连接，读取请求的头信息*/
 		while (EXPECTED(fcgi_accept_request(request) >= 0)) {
 			char *primary_script = NULL;
 			request_body_fd = -1;
@@ -1916,6 +1933,7 @@ consult the installation file that came with this distribution, or visit \n\
 
 			/* request startup only after we've done all we can to
 			 *            get path_translated */
+			/*请求初始化*/
 			if (UNEXPECTED(php_request_startup() == FAILURE)) {
 				fcgi_finish_request(request, 1);
 				SG(server_context) = NULL;
@@ -1977,7 +1995,7 @@ consult the installation file that came with this distribution, or visit \n\
 			}
 
 			fpm_request_executing();
-
+			/*使用Zend VM对php脚本文件进行编译（词法分析+语法分析）生成虚拟机可识别的opcodes，然后执行这些指令*/
 			php_execute_script(&file_handle);
 
 fastcgi_request_done:
@@ -2005,7 +2023,7 @@ fastcgi_request_done:
 
 			efree(SG(request_info).path_translated);
 			SG(request_info).path_translated = NULL;
-
+			/*请求关闭。调用注册的register_shutdown_function回调，调用__destruct析构函数，调用所有php扩展的RSHUTDOWN函数，flush输出内容，发送http响应header，清理全局变量，关闭编译器、执行器，关闭连接fd等*/
 			php_request_shutdown((void *) 0);
 
 			requests++;

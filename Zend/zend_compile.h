@@ -138,6 +138,7 @@ void zend_const_expr_to_zval(zval *result, zend_ast *ast);
 
 typedef int (*user_opcode_handler_t) (zend_execute_data *execute_data);
 
+/*php zend虚拟机定义的指令格式*/
 struct _zend_op {
 	const void *handler;
 	znode_op op1;

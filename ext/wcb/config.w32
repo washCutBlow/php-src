@@ -1,0 +1,7 @@
+ARG_ENABLE('wcb', 'wcb support', 'no');
+
+if (PHP_WCB != 'no') {
+	AC_DEFINE('HAVE_WCB', 1, 'wcb support enabled');
+
+	EXTENSION('wcb', 'wcb.c', null, '/DZEND_ENABLE_STATIC_TSRMLS_CACHE=1');
+}

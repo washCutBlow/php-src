@@ -978,32 +978,49 @@ static int php_cgi_startup(sapi_module_struct *sapi_module)
 
 /* {{{ sapi_module_struct cgi_sapi_module
  */
+
+/*
+ * SAPI提供了一个和外部通信的接口， 对于PHP5.2，默认提供了很多种SAPI， 常见的给apache的mod_php5，CGI，给IIS的ISAPI，还有Shell的CLI
+ * 还有FastCGI 要定义一个SAPI首先要定义一个下面的结构体
+ *
+ * */
 static sapi_module_struct cgi_sapi_module = {
 	"cgi-fcgi",						/* name */
 	"CGI/FastCGI",					/* pretty name */
 
+	/*当一个应用要调用PHP的时候，这个函数会被调用，对于CGI来说，它只是简单的调用了PHP的初始化函数*/
 	php_cgi_startup,				/* startup */
+	/*一个对PHP关闭函数的简单包装。只是简单的调用php_module_shutdown*/
 	php_module_shutdown_wrapper,	/* shutdown */
-
+	/*. PHP会在每个request的时候，处理一些初始化，资源分配的事务。这部分就是activate字段要定义的，从上面的结构我们可以看出，对于CGI来说，它并没有提供初始化处理句柄。对于mod_php来说，那就不同了，他要在apache的pool中注册资源析构函数， 申请空间， 初始化环境变量，等等等等*/
 	sapi_cgi_activate,				/* activate */
+	/*sapi_cgi_deactivate, 这个是对应与activate的函数，顾名思义，它会提供一个handler, 用来处理收尾工作，对于CGI来说，他只是简单的刷新缓冲区，用以保证用户在Zend关闭前得到所有的输出数据*/
 	sapi_cgi_deactivate,			/* deactivate */
-
+/*sapi_cgibin_ub_write, 这个hanlder告诉了Zend，如何输出数据，对于mod_php来说，这个函数提供了一个向response数据写的接口，而对于CGI来说，只是简单的写到stdout*/
 	sapi_cgi_ub_write,				/* unbuffered write */
+	/*sapi_cgibin_flush, 这个是提供给zend的刷新缓存的函数句柄，对于CGI来说，只是简单的调用系统提供的fflush*/
 	sapi_cgi_flush,					/* flush */
+	/*NULL， 这部分用来让Zend可以验证一个要执行脚本文件的state，从而判断文件是否据有执行权限等等，CGI没有提供*/
 	NULL,							/* get uid */
+	/* sapi_cgibin_getenv, 为Zend提供了一个根据name来查找环境变量的接口，对于mod_php5来说，当我们在脚本中调用getenv的时候，就会间接的调用这个句柄。而对于CGI来说，因为他的运行机制和CLI很类似，直接调用父级是Shell， 所以，只是简单的调用了系统提供的genenv:*/
 	sapi_cgi_getenv,				/* getenv */
-
+/*php_error, 错误处理函数, 到这里，说几句题外话，上次看到php maillist 提到的使得PHP的错误处理机制完全OO化， 也就是，改写这个函数句柄，
+ * 使得每当有错误发生的时候，都throw一个异常。而CGI只是简单的调用了PHP提供的错误处理函数*/
 	php_error,						/* error handler */
-
+	/*这个函数会在我们调用PHP的header()函数的时候被调用，对于CGI来说，不提供*/
 	NULL,							/* header handler */
+	/*这个函数会在要真正发送header的时候被调用，一般来说，就是当有任何的输出要发送之前*/
 	sapi_cgi_send_headers,			/* send headers handler */
+	/*NULL, 这个用来单独发送每一个header, CGI没有提供*/
 	NULL,							/* send header handler */
-
+	/*sapi_cgi_read_post, 这个句柄指明了如何获取POST的数据，如果做过CGI编程的话，我们就知道CGI是从stdin中读取POST DATA的*/
 	sapi_cgi_read_post,				/* read POST data */
+	/*sapi_cgi_read_cookies, 这个和上面的函数一样，只不过是去获取cookie值*/
 	sapi_cgi_read_cookies,			/* read Cookies */
-
+	/*sapi_cgi_register_variables, 这个函数给了一个接口，用以给$_SERVER变量中添加变量，对于CGI来说，注册了一个PHP_SELF,这样我们就可以在脚本中访问$_SERVER[‘PHP_SELF’]来获取本次的request_uri*/
 	sapi_cgi_register_variables,	/* register server variables */
 	sapi_cgi_log_message,			/* Log message */
+	/*sapi_cgi_log_message ，用来输出错误信息，对于CGI来说，只是简单的输出到stderr*/
 	NULL,							/* Get request time */
 	NULL,							/* Child terminate */
 

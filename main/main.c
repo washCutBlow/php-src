@@ -2015,6 +2015,7 @@ int php_module_startup(sapi_module_struct *sf, zend_module_entry *additional_mod
 	zuf.printf_to_smart_str_function = php_printf_to_smart_str;
 	zuf.getenv_function = sapi_getenv;
 	zuf.resolve_path_function = php_resolve_path_for_zend;
+	/*启动zend引擎*/
 	zend_startup(&zuf, NULL);
 
 #if HAVE_SETLOCALE
@@ -2106,6 +2107,7 @@ int php_module_startup(sapi_module_struct *sf, zend_module_entry *additional_mod
 	/* this will read in php.ini, set up the configuration parameters,
 	   load zend extensions and register php function extensions
 	   to be loaded later */
+	/*读取php.ini的配置并解析*/
 	if (php_init_config() == FAILURE) {
 		return FAILURE;
 	}
@@ -2146,6 +2148,10 @@ int php_module_startup(sapi_module_struct *sf, zend_module_entry *additional_mod
 	zuv.html_errors = 1;
 	zuv.import_use_extension = ".php";
 	zuv.import_use_extension_length = (uint32_t)strlen(zuv.import_use_extension);
+	/*向CG(auth_globals)中注册_GET、_POST、_COOKIE、_SERVER等超全局变量钩子
+	 *
+	 *
+	 * */
 	php_startup_auto_globals();
 	zend_set_utility_values(&zuv);
 	php_startup_sapi_content_types();
@@ -2166,10 +2172,14 @@ int php_module_startup(sapi_module_struct *sf, zend_module_entry *additional_mod
 	   which is always an internal extension and to be initialized
 	   ahead of all other internals
 	 */
+	/*遍历extension_lists.functions，使用dlopen函数打开xx.so扩展文件，将所有的php扩展注册到全局变量module_registry中，同时如果php扩展有实现函数的话，将实现的函数注册到CG(function_table)。遍历extension_lists.engine，使用dlopen函数打开xx.so扩展文件，将所有的zend扩展注册到全局变量zend_extensions中
+	 * */
 	php_ini_register_extensions();
+	/*遍历module_registry，调用所有php扩展的MINIT函数*/
 	zend_startup_modules();
 
 	/* start Zend extensions */
+	/*遍历zend_extensions，调用所有zend扩展的startup函数*/
 	zend_startup_extensions();
 
 	zend_collect_module_handlers();

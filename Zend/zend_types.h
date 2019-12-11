@@ -24,6 +24,7 @@
 #ifndef ZEND_TYPES_H
 #define ZEND_TYPES_H
 
+#include <lzma.h>
 #include "zend_portability.h"
 #include "zend_long.h"
 
@@ -176,12 +177,47 @@ typedef union _zend_value {
 	} ww;
 } zend_value;
 
+	/*
+	 *
+	 *  以前的经验也告诉我们， 一个数据除了它的类型以外， 还应该有很多其他的属性，
+	 *  比如对于INTERNED STRING，它是一种在整个PHP请求期都存在的字符串(比如你写在代码中的字面量), 它不会被引用计数回收.
+	 *  在5.4的版本中我们是通过预先申请一块内存， 然后再这个内存中分配字符串， 最后用指针地址来比较， 如果一个字符串是属于INTERNED STRING的内存范围内，
+	 *  就认为它是INTERNED STRING. 这样做的缺点显而易见， 就是当内存不够的时候， 我们就没有办法分配INTERNED STRING了，
+	 *  另外也非常丑陋， 所以如果一个字符串能有一些属性定义则这个实现就可以变得很优雅
+	 *   一共16个字节
+	 *
+	 * */
 struct _zval_struct {
+	//  存放变量的值
 	zend_value        value;			/* value */
 	union {
 		struct {
 			ZEND_ENDIAN_LOHI_3(
 				zend_uchar    type,			/* active type */
+				// 该变量处引入一个标志位IS_TYPE_REFCOUNTED保存在该字段中，
+				// (Z_TYPE_FLAGS(zv) & IS_TYPE_REFCOUNTED 取出该位标示就可以判断该zval是否是需要引用计数的类型
+				// 而对于INTERNED STRING来说， 这个IS_STR_INTERNED标志位应该是作用于字符串本身而不是zval的
+				/*类似标志为有：
+				 * IS_TYPE_CONSTANT            //是常量类型
+IS_TYPE_IMMUTABLE           //不可变的类型， 比如存在共享内存的数组
+IS_TYPE_REFCOUNTED          //需要引用计数的类型
+IS_TYPE_COLLECTABLE         //可能包含循环引用的类型(IS_ARRAY, IS_OBJECT)
+IS_TYPE_COPYABLE            //可被复制的类型， 还记得我之前讲的对象和资源的例外么？ 对象和资源就不是
+
+				 作用于字符串的有
+				 IS_STR_PERSISTENT             //是malloc分配内存的字符串
+IS_STR_INTERNED             //INTERNED STRING
+IS_STR_PERMANENT            //不可变的字符串， 用作哨兵作用
+IS_STR_CONSTANT             //代表常量的字符串
+IS_STR_CONSTANT_UNQUALIFIED //带有可能命名空间的常量字符串
+				 作用于对象的有
+				 IS_OBJ_APPLY_COUNT          //递归保护
+IS_OBJ_DESTRUCTOR_CALLED    //析构函数已经调用
+IS_OBJ_FREE_CALLED          //清理函数已经调用
+IS_OBJ_USE_GUARDS           //魔术方法递归保护
+IS_OBJ_HAS_GUARDS           //是否有魔术方法递归保护标志
+				 *
+				 * */
 				zend_uchar    type_flags,
 				union {
 					uint16_t  call_info;    /* call info for EX(This) */
@@ -189,7 +225,7 @@ struct _zval_struct {
 				} u)
 		} v;
 		uint32_t type_info;
-	} u1;
+	} u1;//  存放变量的类型信息
 	union {
 		uint32_t     next;                 /* hash collision chain */
 		uint32_t     cache_slot;           /* literal cache slot */
@@ -200,7 +236,7 @@ struct _zval_struct {
 		uint32_t     access_flags;         /* class constant access flags */
 		uint32_t     property_guard;       /* single property guard */
 		uint32_t     extra;                /* not further specified */
-	} u2;
+	} u2;/*存储了一些额外数据，比如hash碰撞时的next*/
 };
 
 typedef struct _zend_refcounted_h {
@@ -220,10 +256,28 @@ struct _zend_refcounted {
 	zend_refcounted_h gc;
 };
 
+/*关于字符串：
+ * 1 常量字符串，在PHP代码中的固定字符串，在编译阶段存储在全局变量表中，又叫做字面量表，请求结束后才会被销毁，所以refcount一直为0
+ * 2 临时字符串，发生在虚拟机执行opcode时计算出来的字符串，存储在临时变量区，有正常的refcount
+ * 3 对于临时字符串，应该是每有一个被赋值的变量时，该zend_string中的引用计数+1，并且在引用计数为0时，释放这块内存。
+ *
+ *
+ * 1.代码中直接硬编码的字符串，在字面量表中，引用计数一直为0，直到整个脚本执行完毕后，才会销毁。
+2.在执行阶段计算出来的字符串，临时字符串，引用计数正常计算，每个引用都会加1。在引用计数为0时回收内存。
+3.引用类型的字符串，多个变量引用计数计算在引用类型(zend_reference)上。字符串被zend_reference引用，引用计数为1。
+4.特殊的字符串（如 string array等)，在PHP初始化时创建的，整个脚本执行完毕后才会销毁，引用计数一直为1
+ *
+ * */
 struct _zend_string {
+    /*在程序执行gc或其他操作的时候，对于任意一个复杂类型，指针头部就是gc，里面不光有引用计数，并且能通过u.v.type确定该复杂类型的真正类型*/
 	zend_refcounted_h gc;
+	/*这是字符串的hash，空间换时间的思想，把计算好的hash保存下来，提高性能*/
 	zend_ulong        h;                /* hash value */
+	//  字符串长度
 	size_t            len;
+	/*这种写法是c里面的柔性数组，这里存储了整个字符串，通过这个方式保证字符串所在的内存地址是与该结构体内存地址紧密相连的，减少了去另外一个块内存取值的时间
+	 * c的零数组
+	 * */
 	char              val[1];
 };
 
@@ -350,6 +404,11 @@ struct _zend_resource {
 	void             *ptr;
 };
 
+/*引用类型
+ * 对于IS_REFERNCE类型的zval, zval.value.ref是一个指向zend_reference的指针
+ * 所以对于IS_LONG的引用来说, 就用一个类型是IS_REFERNCE的zval,
+ * 它指向一个zend_reference, 而这个zend_reference->val中是一个类型为IS_LONG的zval
+ * */
 struct _zend_reference {
 	zend_refcounted_h gc;
 	zval              val;
